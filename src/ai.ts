@@ -164,7 +164,11 @@ export interface AgentContext {
 
 export async function converse(s: Settings, history: Turn[], text: string, ctx: AgentContext): Promise<AgentReply> {
   if (!hasClaude(s)) return demoReply(text, ctx)
-  const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12).map((t) => ({ role: t.role, content: t.text }))
+  // The agent remembers what it put on the table in each earlier reply.
+  const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12).map((t) => ({
+    role: t.role,
+    content: t.steps?.length ? `${t.text}\n(added: ${t.steps.map((s) => `${s.count} ${s.kind}${s.model ? ` via ${s.model}` : ''}`).join(', ')})` : t.text,
+  }))
   const content: Anthropic.Beta.BetaContentBlockParam[] = []
   for (const url of ctx.selectedImages.slice(0, 4)) {
     const b = toImageBlock(url)

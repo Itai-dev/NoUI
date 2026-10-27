@@ -2,14 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { converse, detectServerKeys, generateMedia, hasClaude, hasFal, loadSettings, saveSettings, speak, summarizeBoard, type Action, type Settings } from './ai'
 import Composer, { type AgentStatus, type ComposerHandle } from './Composer'
 import { bounds, footprint, placeBatch, project, screenBox, sizeFor, uid } from './geometry'
+import { Chevron, Menu, NewChat } from './Icons'
 import Iso, { type View } from './Iso'
 import { defaultModel, getModel, NOTE_COLORS } from './models'
 import SettingsModal from './SettingsModal'
-import type { Item, MediaKind, Turn } from './types'
+import Thread from './Thread'
+import type { Item, MediaKind, Step, Turn } from './types'
 import './App.css'
 
 const BOARD_KEY = 'atelier.iso.v1'
 const isMedia = (k: string): k is MediaKind => ['image', 'video', 'audio', 'model3d'].includes(k)
+
+const MODEL_NAMES: Record<string, string> = { 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5' }
 
 function load(): { name: string; items: Item[]; turns: Turn[] } {
   try {
@@ -51,7 +55,7 @@ export default function App() {
   const initial = useMemo(load, [])
   const [items, setItems] = useState<Item[]>(initial.items)
   const [turns, setTurns] = useState<Turn[]>(initial.turns)
-  const [name] = useState(initial.name)
+  const [name, setName] = useState(initial.name)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [view, setView] = useState<View>({ x: 0, y: -40, zoom: 0.9 })
   const [settings, setSettings] = useState<Settings>(loadSettings)
@@ -123,9 +127,9 @@ export default function App() {
     setView((v) => ({ ...v, x: -c.x * v.zoom, y: -c.y * v.zoom + 40 }))
   }, [])
 
-  /** Places the agent's actions on the table and starts their generation. */
+  /** Places the agent's actions on the table and starts their generation. Returns what was added, for the thread. */
   const applyActions = useCallback(
-    (actions: Action[], selImages: string[]) => {
+    (actions: Action[], selImages: string[]): Step[] => {
       const current = itemsRef.current
       const sel = current.filter((it) => selected.has(it.id))
       const anchorItems = sel.length ? sel : current.filter((it) => lastBatch.current.includes(it.id))
@@ -153,11 +157,13 @@ export default function App() {
 
       // Run media, honoring chains ("after") and shared variation batches.
       const results: Promise<string | null>[] = []
+      const steps: Step[] = []
       let i = 0
       while (i < expanded.length) {
         const { a, idx } = expanded[i]
         const group = expanded.filter((e) => e.idx === idx).length
         const ids = created.slice(i, i + group).map((c) => c.id)
+        steps.push({ kind: a.kind, model: created[i].model, count: group, prompt: a.content })
         if (isMedia(a.kind)) {
           const model = created[i].model!
           const upstream = a.after >= 0 && a.after < idx ? results[a.after] : null
@@ -175,6 +181,7 @@ export default function App() {
         } else results[idx] = Promise.resolve(null)
         i += group
       }
+      return steps
     },
     [fill, focusOn, selected],
   )
@@ -199,9 +206,8 @@ export default function App() {
           const gone = new Set(reply.remove)
           setItems((is) => is.filter((it) => !gone.has(it.id)))
         }
-        if (reply.actions.length) applyActions(reply.actions, selImages)
-        const summary = reply.actions.length ? `${reply.reply}\n(added: ${reply.actions.map((a) => `${a.kind}${a.model ? ` via ${a.model}` : ''}`).join(', ')})` : reply.reply
-        setTurns((t) => [...t, { role: 'assistant', text: summary, at: Date.now() }])
+        const steps = reply.actions.length ? applyActions(reply.actions, selImages) : undefined
+        setTurns((t) => [...t, { role: 'assistant', text: reply.reply, at: Date.now(), steps }])
         if (settings.speak && reply.reply) {
           setStatus('speaking')
           const spoken = reply.reply.replace(/\s*\(Demo:.*\)$/, '')
@@ -221,8 +227,19 @@ export default function App() {
         setTurns((t) => [...t, { role: 'assistant', text: `Something went wrong: ${msg}`, at: Date.now() }])
       }
     },
-    [applyActions, interrupt, say, selected, settings, turns],
+    [applyActions, interrupt, selected, settings, turns],
   )
+
+  const newTable = useCallback(() => {
+    if ((items.length || turns.length) && !window.confirm('Start a new table? The current one and its conversation will be cleared.')) return
+    interrupt()
+    setItems([])
+    setTurns([])
+    setSelected(new Set())
+    setName('Untitled table')
+    setView({ x: 0, y: -40, zoom: 0.9 })
+    composer.current?.focus()
+  }, [interrupt, items.length, turns.length])
 
   // ----- Table interactions -----
   const onSelect = useCallback((ids: string[], additive: boolean) => {
@@ -314,39 +331,50 @@ export default function App() {
         }
       }}
     >
-      <Iso
-        items={items}
-        selected={selected}
-        view={view}
-        setView={setView}
-        onSelect={onSelect}
-        onMove={onMove}
-        onOpen={(it) => it.kind !== 'note' && it.url && setLightbox(it)}
-        onEdit={(id, text) => patch(id, { text })}
-        title={name}
-        status={winStatus}
-      />
-      <div className="under">
+      <header className="top">
+        <button className="icon" title="Settings" onClick={() => setShowSettings(true)}>
+          <Menu />
+        </button>
+        <button className="brand" title="Agent model and settings" onClick={() => setShowSettings(true)}>
+          Atelier
+          <span className="model">
+            {MODEL_NAMES[settings.claudeModel] ?? settings.claudeModel}
+            <Chevron />
+          </span>
+        </button>
+        <span className="spacer" />
         {keysMissing && (
           <button className="demo-chip" onClick={() => setShowSettings(true)}>
             Demo mode · add keys
           </button>
         )}
-        {toast && <div className="toast">{toast}</div>}
-      </div>
-      <Composer
-        ref={composer}
-        settings={settings}
-        status={status}
-        talk={talk}
-        setTalk={setTalk}
-        turns={turns}
-        onSend={send}
-        onInterrupt={interrupt}
-        onError={say}
-        onOpenSettings={() => setShowSettings(true)}
-      />
+        <button className="icon" title="New table" onClick={newTable}>
+          <NewChat />
+        </button>
+      </header>
 
+      <div className="body">
+        <section className="chat">
+          <Thread turns={turns} status={status} onInterrupt={interrupt} onSuggest={send} />
+          <Composer ref={composer} settings={settings} status={status} talk={talk} setTalk={setTalk} onSend={send} onAttach={addImage} onInterrupt={interrupt} onError={say} />
+        </section>
+        <section className="canvas">
+          <Iso
+            items={items}
+            selected={selected}
+            view={view}
+            setView={setView}
+            onSelect={onSelect}
+            onMove={onMove}
+            onOpen={(it) => it.kind !== 'note' && it.url && setLightbox(it)}
+            onEdit={(id, text) => patch(id, { text })}
+            title={name}
+            status={winStatus}
+          />
+        </section>
+      </div>
+
+      {toast && <div className="toast">{toast}</div>}
       {showSettings && (
         <SettingsModal
           value={settings}

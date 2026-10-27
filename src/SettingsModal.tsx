@@ -7,7 +7,7 @@ export default function SettingsModal({ value, onSave, onClose }: { value: Setti
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Settings</h2>
-        <p className="muted">Keys stay in this browser and go straight to Anthropic and fal.ai. Without keys the agent runs in a simple demo mode and images are placeholders.</p>
+        <p className="muted">The server already holds keys when it shows no demo badge. Keys typed here stay in this browser and go straight to Anthropic and fal.ai. Without any keys the agent runs a simple demo and images are placeholders.</p>
         <label>
           Anthropic API key <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">get one</a>
           <input type="password" value={s.anthropicKey} placeholder="sk-ant-…" onChange={(e) => setS({ ...s, anthropicKey: e.target.value.trim() })} />

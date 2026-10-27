@@ -1,6 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
 import { hasFal, transcribe, type Settings } from './ai'
-import type { Turn } from './types'
+import { ArrowUp, Mic, Plus, Stop, Waves } from './Icons'
 
 export type AgentStatus = 'idle' | 'thinking' | 'speaking'
 
@@ -15,11 +15,10 @@ interface Props {
   status: AgentStatus
   talk: boolean // conversation mode: keep listening after each reply
   setTalk: (v: boolean) => void
-  turns: Turn[]
   onSend: (text: string) => void
+  onAttach: (file: File) => void
   onInterrupt: () => void // user started talking/typing while the agent speaks
   onError: (msg: string) => void
-  onOpenSettings: () => void
 }
 
 type SR = { start(): void; stop(): void; abort(): void } & EventTarget
@@ -28,23 +27,18 @@ const SpeechRecognitionCtor: (new () => SR & Record<string, unknown>) | undefine
   (window as unknown as { webkitSpeechRecognition?: new () => SR & Record<string, unknown> }).webkitSpeechRecognition
 
 /** The one line of input: type it, or say it. */
-const Composer = forwardRef<ComposerHandle, Props>(function Composer({ settings, status, talk, setTalk, turns, onSend, onInterrupt, onError, onOpenSettings }, ref) {
+const Composer = forwardRef<ComposerHandle, Props>(function Composer({ settings, status, talk, setTalk, onSend, onAttach, onInterrupt, onError }, ref) {
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
   const [transcribing, setTranscribing] = useState(false)
-  const [showLog, setShowLog] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const logRef = useRef<HTMLDivElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const srRef = useRef<SR | null>(null)
   const srBroken = useRef(false) // the browser's recognizer exists but can't reach its service
   const recRef = useRef<{ rec: MediaRecorder; stop: (cancel: boolean) => void } | null>(null)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
-
-  useEffect(() => {
-    if (showLog) logRef.current?.scrollTo({ top: 1e9 })
-  }, [showLog, turns])
 
   const send = useCallback(
     (t: string) => {
@@ -190,38 +184,22 @@ const Composer = forwardRef<ComposerHandle, Props>(function Composer({ settings,
     }
   }
 
-  const last = [...turns].reverse().find((t) => t.role === 'assistant')
-  const statusText = transcribing ? 'Transcribing…' : listening ? interim || 'Listening…' : status === 'thinking' ? 'Thinking…' : status === 'speaking' ? 'Speaking… click to interrupt' : ''
+  const hint = transcribing ? 'Transcribing…' : listening ? 'Listening… it sends when you pause' : talk ? 'Conversation on · I keep listening after each reply' : ''
+  const placeholder = listening ? interim || 'Listening…' : 'Ask anything'
+  const hasText = text.trim().length > 0
 
   return (
     <div className="composer">
-      {(last || statusText) && (
-        <div className={`ribbon ${status} ${listening ? 'listening' : ''}`} onClick={() => (status === 'speaking' ? onInterrupt() : setShowLog((v) => !v))}>
-          {statusText && (
-            <span className="ribbon-status">
-              {listening && <Waves />}
-              {status === 'thinking' && <span className="spinner" />}
-              {statusText}
-            </span>
-          )}
-          {last && !listening && <span className="ribbon-reply">✦ {last.text.split('\n')[0]}</span>}
-          {!statusText && turns.length > 1 && <span className="ribbon-more">{showLog ? 'hide' : 'history'}</span>}
-        </div>
-      )}
-      {showLog && (
-        <div className="log" ref={logRef}>
-          {turns.map((t, i) => (
-            <div key={i} className={`turn ${t.role}`}>{t.text}</div>
-          ))}
-        </div>
-      )}
-      <div className={`line ${listening ? 'is-listening' : ''}`}>
-        <button className="icon settings-btn" title="Settings" onClick={onOpenSettings}>⚙</button>
+      <div className={`pill ${listening ? 'is-listening' : ''}`}>
+        <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onAttach(f); e.target.value = '' }} />
+        <button className="icon" title="Add an image to the table" onClick={() => fileRef.current?.click()}>
+          <Plus />
+        </button>
         <input
           ref={inputRef}
           autoFocus
           value={text}
-          placeholder={talk ? 'Conversation on. Just talk, or type.' : 'Say or type what to make… e.g. "a poster for a jazz night, then animate it"'}
+          placeholder={placeholder}
           onChange={(e) => {
             setText(e.target.value)
             if (status === 'speaking') onInterrupt()
@@ -232,29 +210,22 @@ const Composer = forwardRef<ComposerHandle, Props>(function Composer({ settings,
             e.stopPropagation()
           }}
         />
-        <button
-          className={`icon mic ${listening ? 'on' : ''}`}
-          title={listening ? 'Stop listening' : 'Hold a thought: click and speak'}
-          onClick={() => (listening ? stopListening() : listen())}
-          disabled={transcribing}
-        >
-          {listening ? '■' : '🎙'}
+        <button className={`icon mic ${listening ? 'on' : ''}`} title={listening ? 'Stop listening' : 'Say it'} onClick={() => (listening ? stopListening() : listen())} disabled={transcribing}>
+          {listening ? <Stop /> : <Mic />}
         </button>
-        <button className={`icon talk ${talk ? 'on' : ''}`} title={talk ? 'Conversation mode on: I keep listening after each reply' : 'Conversation mode: talk back and forth'} onClick={toggleTalk}>
-          🗣
-        </button>
-        <button className="send" disabled={!text.trim() || status === 'thinking'} onClick={() => send(text)} title="Send (Enter)">↑</button>
+        {hasText ? (
+          <button className="go" title="Send (Enter)" disabled={status === 'thinking'} onClick={() => send(text)}>
+            <ArrowUp />
+          </button>
+        ) : (
+          <button className={`go talk ${talk ? 'on' : ''}`} title={talk ? 'End the conversation' : 'Talk back and forth'} onClick={toggleTalk}>
+            <Waves />
+          </button>
+        )}
       </div>
+      <div className={`hint ${listening ? 'live' : ''}`}>{hint}</div>
     </div>
   )
 })
-
-function Waves() {
-  return (
-    <span className="waves">
-      <i /><i /><i /><i />
-    </span>
-  )
-}
 
 export default Composer

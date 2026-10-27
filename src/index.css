@@ -1,15 +1,16 @@
 :root {
-  --bg: #17141f;
-  --ink: #1e1e1e;
-  --ink-2: #4d4d4d;
-  --muted: #8c8c8c;
+  --bg: #ffffff;
+  --ink: #0d0d0d;
+  --ink-2: #5d5d5d;
+  --muted: #8f8f8f;
   --line: #e6e6e6;
   --hover: #f0f0f0;
-  --brand: #9747ff;
-  --brand-soft: #f1e8ff;
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 13px;
-  color: #f2eefb;
+  --bubble: #f4f4f4;
+  --brand: #0d0d0d;
+  --brand-soft: #ececec;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  color: var(--ink);
   background: var(--bg);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
@@ -25,7 +26,7 @@ body,
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: radial-gradient(ellipse at 50% 0%, #2a2340 0%, #17141f 55%, #0f0d15 100%);
+  background: var(--bg);
 }
 
 button,
@@ -40,7 +41,7 @@ button {
   cursor: pointer;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 6px 10px;
   display: inline-flex;
   align-items: center;
@@ -61,7 +62,7 @@ button.primary {
   font-weight: 600;
 }
 button.primary:hover:not(:disabled) {
-  background: #8638f0;
+  background: #333;
 }
 
 input,
@@ -69,8 +70,8 @@ select,
 textarea {
   background: white;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
+  border-radius: 10px;
+  padding: 8px 10px;
   outline: none;
   min-width: 0;
   color: var(--ink);
@@ -78,8 +79,8 @@ textarea {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: var(--brand);
+  border-color: var(--ink);
 }
 a {
-  color: var(--brand);
+  color: var(--ink);
 }

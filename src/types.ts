@@ -22,8 +22,17 @@ export interface Item {
   createdAt: number
 }
 
+/** One thing the agent put on the table in a reply. */
+export interface Step {
+  kind: ItemKind
+  model?: string
+  count: number
+  prompt: string
+}
+
 export interface Turn {
   role: 'user' | 'assistant'
   text: string
   at: number
+  steps?: Step[]
 }

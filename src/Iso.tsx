@@ -98,7 +98,6 @@ export default function Iso({ items, selected, view, setView, onSelect, onMove, 
   return (
     <div className="win">
       <div className="win-bar">
-        <span className="lights"><i /><i /><i /></span>
         <span className="win-title">{title}</span>
         <span className="win-status">{status}</span>
       </div>
