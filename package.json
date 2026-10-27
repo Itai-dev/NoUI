@@ -1,0 +1,26 @@
+{
+  "name": "atelier",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "build": "tsc -b && node dev.mjs --build",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.0.0",
+    "@fal-ai/client": "^1.10.1",
+    "@google/model-viewer": "^4.4.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.88.0",
+    "typescript": "~6.0.3"
+  }
+}
