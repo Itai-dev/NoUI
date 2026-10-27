@@ -3,7 +3,6 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "www",
-  "functions": {
-    "api/**/*.js": { "maxDuration": 300 }
-  }
+  "functions": { "api/*.js": { "maxDuration": 300 } },
+  "rewrites": [{ "source": "/api/anthropic/:path*", "destination": "/api/anthropic?path=:path*" }]
 }

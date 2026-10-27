@@ -25,7 +25,9 @@ If you prefer, ⚙ Settings still accepts keys typed into the browser. Without a
 
 ## Deploy
 
-The repo deploys to Vercel as is: `vercel.json` builds with `npm run build` and serves `www`, and the three files in `api/` are the same key proxy as serverless functions. Set `ANTHROPIC_API_KEY` and `FAL_KEY` in the Vercel project's environment variables; the app detects them through `/api/config` and shows no demo badge.
+Live at https://noui-nu.vercel.app (Vercel project `noui`, connected to this repo, so every push to `main` deploys).
+
+The repo deploys to Vercel as is: `vercel.json` builds with `npm run build` and serves `www`, and the three files in `api/` are the same key proxy as serverless functions (`/api/anthropic/*` is one function behind a rewrite). Set `ANTHROPIC_API_KEY` and `FAL_KEY` in the Vercel project's environment variables, or run `node scripts/vercel-env.mjs` after `vercel link` to copy them from the local `.env`; the app detects them through `/api/config` and shows no demo badge.
 
 ## Code
 
