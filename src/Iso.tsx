@@ -1,6 +1,7 @@
 import '@google/model-viewer'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { footprint, project, TILT, TURN, unproject } from './geometry'
+import { getMind } from './minds'
 import { getModel, MEDIA_LABEL, NOTE_COLORS } from './models'
 import type { Item } from './types'
 
@@ -53,6 +54,7 @@ export default function Iso({ items, selected, view, setView, onSelect, onMove, 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0 && e.button !== 1) return
+      if ((e.target as HTMLElement).closest('a')) return // let links on cards open
       const target = (e.target as HTMLElement).closest<HTMLElement>('[data-item]')
       if (target?.dataset.item && e.button === 0 && !(e.target as HTMLElement).closest('[data-ui]')) {
         drag.current = { kind: 'item', id: target.dataset.item, x: e.clientX, y: e.clientY, moved: false }
@@ -116,6 +118,7 @@ export default function Iso({ items, selected, view, setView, onSelect, onMove, 
       >
         <div className="floor" style={{ transform: floorTransform }}>
           <div className="grid" />
+          <Links items={items} />
           {items.map((it) => (
             <ItemView key={it.id} item={it} selected={selected.has(it.id)} onEdit={onEdit} />
           ))}
@@ -131,8 +134,81 @@ export default function Iso({ items, selected, view, setView, onSelect, onMove, 
   )
 }
 
+/** Lines on the floor between linked items: lineage, a direction's sources, what a voice reacts to. */
+const Links = memo(function Links({ items }: { items: Item[] }) {
+  const byId = new Map(items.map((it) => [it.id, it]))
+  const center = (it: Item) => {
+    const f = footprint(it)
+    return { x: f.x + f.w / 2, y: f.y + f.h / 2 }
+  }
+  const lines = items.flatMap((it) =>
+    (it.links ?? [])
+      .map((id) => byId.get(id))
+      .filter((t): t is Item => !!t)
+      .map((t) => ({ key: `${it.id}-${t.id}`, a: center(it), b: center(t), dir: it.card === 'direction' })),
+  )
+  if (!lines.length) return null
+  return (
+    <svg className="links" width="1" height="1">
+      {lines.map((l) => (
+        <g key={l.key} className={l.dir ? 'dir' : ''}>
+          <line x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} />
+          <circle cx={l.b.x} cy={l.b.y} r="5" />
+        </g>
+      ))}
+    </svg>
+  )
+})
+
+const searchUrl = (q: string) => `https://www.google.com/search?q=${encodeURIComponent(q)}`
+
+function Card({ it, onEdit }: { it: Item; onEdit: (id: string, text: string) => void }) {
+  if (it.card === 'reference')
+    return (
+      <>
+        <div className="card-kicker">Steal from</div>
+        <div className="card-who">{it.who}</div>
+        <div className="card-title">
+          {it.title}{' '}
+          <a href={searchUrl(`${it.who} ${it.title}`)} target="_blank" rel="noreferrer" title="Look up the original">
+            ↗
+          </a>
+        </div>
+        <NoteText id={it.id} text={it.text ?? ''} onEdit={onEdit} size="sm" />
+      </>
+    )
+  if (it.card === 'direction') {
+    const sources = it.sources ?? []
+    return (
+      <>
+        <div className="card-kicker">Direction</div>
+        <div className="card-who">{it.title}</div>
+        <div className="card-title">{sources.join(' × ')}</div>
+        <NoteText id={it.id} text={it.text ?? ''} onEdit={onEdit} size="sm" />
+        {it.constraint && <div className="card-constraint">Constraint: {it.constraint}</div>}
+        {sources.length < 2 && <div className="card-flag">One source only: remix it with another</div>}
+      </>
+    )
+  }
+  const mind = getMind(it.mind)
+  return (
+    <>
+      <div className="card-kicker">{mind ? `${mind.short} · ${mind.years}` : it.who || 'Studio'}</div>
+      <NoteText id={it.id} text={it.text ?? ''} onEdit={onEdit} size="md" />
+    </>
+  )
+}
+
 const ItemView = memo(function ItemView({ item: it, selected, onEdit }: { item: Item; selected: boolean; onEdit: (id: string, text: string) => void }) {
   const fp = footprint(it)
+  if (it.kind === 'note' && it.card) {
+    const bg = it.card === 'voice' ? (getMind(it.mind)?.color ?? NOTE_COLORS.gray) : it.card === 'direction' ? '#1f1d1a' : '#fbfaf7'
+    return (
+      <div data-item={it.id} className={`note cardnote card-${it.card} ${selected ? 'sel' : ''}`} style={{ left: it.x, top: it.y, width: it.w, height: it.h, background: bg }}>
+        <Card it={it} onEdit={onEdit} />
+      </div>
+    )
+  }
   if (it.kind === 'note') {
     return (
       <div
@@ -180,9 +256,9 @@ const ItemView = memo(function ItemView({ item: it, selected, onEdit }: { item: 
   )
 })
 
-function NoteText({ id, text, onEdit }: { id: string; text: string; onEdit: (id: string, text: string) => void }) {
+function NoteText({ id, text, onEdit, size: fixed }: { id: string; text: string; onEdit: (id: string, text: string) => void; size?: 'sm' | 'md' }) {
   const [editing, setEditing] = useState(false)
-  const size = text.length < 40 ? 'lg' : text.length < 100 ? 'md' : 'sm'
+  const size = fixed ?? (text.length < 40 ? 'lg' : text.length < 100 ? 'md' : 'sm')
   if (editing)
     return (
       <textarea

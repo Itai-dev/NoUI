@@ -1,4 +1,4 @@
-import type { Item, ItemKind } from './types'
+import type { CardKind, Item, ItemKind } from './types'
 
 // The floor is rotated rotateX(TILT) rotateZ(TURN) with no perspective (orthographic),
 // which is what makes it read as isometric.
@@ -25,11 +25,11 @@ export const uid = () => `i${Date.now().toString(36)}${(seq++).toString(36)}`
 const ASPECT: Record<string, number> = { '1:1': 1, '16:9': 16 / 9, '9:16': 9 / 16, '4:3': 4 / 3, '3:4': 3 / 4 }
 
 /** Footprint on the floor (w across, h deep) and, for standing items, their height. */
-export function sizeFor(kind: ItemKind, aspect = '1:1') {
+export function sizeFor(kind: ItemKind, aspect = '1:1', card?: CardKind | '') {
   const r = ASPECT[aspect] ?? 1
   switch (kind) {
     case 'note':
-      return { w: 180, h: 180 }
+      return card === 'reference' || card === 'direction' ? { w: 230, h: 210 } : card === 'voice' ? { w: 210, h: 190 } : { w: 180, h: 180 }
     case 'image':
       return r >= 1 ? { w: 260, h: Math.round(260 / r) } : { w: Math.round(300 * r), h: 300 }
     case 'video':

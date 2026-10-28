@@ -6,6 +6,8 @@ You say or type what you want. The agent (Claude) answers in a sentence, picks t
 
 - **The line.** Enter sends. The microphone listens for one thought. The voice button turns on conversation mode: the agent speaks its reply and keeps listening, so you can talk back and forth. `/` focuses the line, Space starts listening when you're not typing.
 - **The table.** Drag the floor to pan, Ctrl+scroll or pinch to zoom, scroll to pan. Click to select, Shift+click for more, drag items to move them, double-click an image or video to see it large, double-click a note to edit it, Delete removes the selection. Paste or drop an image to put it on the table.
+- **Remix.** Bring a brief ("an identity for a bookshop; I love Paula Scher and Dieter Rams") and the agent works the way Austin Kleon's *Steal Like an Artist* describes: a lineage map of your favorites and who they learned from, a credited card for each with what to steal and why, then 2–3 directions that combine distant sources under one constraint (one of them deliberately bold). Lines on the table show who descends from whom. A direction built on a single source is flagged. Say "go" on a direction and it sketches it.
+- **The studio.** Bring up to four creative minds from history into the room (Dalí, Disney, Jobs, Hokusai, Chanel, Miles Davis and more, in `src/minds.ts`). Each reacts to your project with its own card, through that person's documented methods and way of seeing, never invented quotes. Anyone else can be asked about by name. Only people no longer living are offered as studio members.
 - **The agent chooses models.** It reads a short guide of what each model is good at (fast drafts vs. hero quality, text in images, vector art, edits of a reference, clips with sound, image to video, image to 3D) and says which it chose and why. Name a model or a quality level and it follows you.
 
 ## Run
@@ -36,7 +38,8 @@ The repo deploys to Vercel as is: `vercel.json` builds with `npm run build` and 
 - `src/Composer.tsx`: the pill: text, add image, microphone (browser recognizer, then Whisper), conversation mode
 - `src/Iso.tsx`: the window and the isometric scene (CSS 3D, orthographic), items, pan, zoom, drag
 - `src/geometry.ts`: projection math and screen-space placement without overlaps
-- `src/ai.ts`: Claude agent (structured JSON reply + actions), fal.ai media, speech to text, text to speech
+- `src/ai.ts`: Claude agent (structured JSON reply + actions, the remix method), fal.ai media, speech to text, text to speech
+- `src/minds.ts`: the studio's creative minds: lens, methods, color; `src/StudioModal.tsx`: the picker
 - `src/models.ts`: the fal.ai models with the guidance the agent uses to choose between them
 
 `dev.mjs` is the esbuild dev server plus the key proxy; `api/` is the same proxy for Vercel. Esbuild is used directly because this machine's security policy blocks Vite's native bundler.
