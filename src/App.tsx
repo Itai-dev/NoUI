@@ -4,13 +4,25 @@ import Composer, { type AgentStatus, type ComposerHandle } from './Composer'
 import { bounds, footprint, placeBatch, project, screenBox, sizeFor, uid } from './geometry'
 import { Chevron, Menu, NewChat } from './Icons'
 import Iso, { type View } from './Iso'
+import { MAX_TEAM } from './minds'
 import { defaultModel, getModel, NOTE_COLORS } from './models'
+import StudioModal, { Studio } from './StudioModal'
 import SettingsModal from './SettingsModal'
 import Thread from './Thread'
 import type { Item, MediaKind, Step, Turn } from './types'
 import './App.css'
 
 const BOARD_KEY = 'atelier.iso.v1'
+const TEAM_KEY = 'atelier.team'
+
+function loadTeam(): string[] {
+  try {
+    const t = JSON.parse(localStorage.getItem(TEAM_KEY) || '[]')
+    return Array.isArray(t) ? t.slice(0, MAX_TEAM) : []
+  } catch {
+    return []
+  }
+}
 const isMedia = (k: string): k is MediaKind => ['image', 'video', 'audio', 'model3d'].includes(k)
 
 const MODEL_NAMES: Record<string, string> = { 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5' }
@@ -74,6 +86,16 @@ export default function App() {
     }
   }, [])
   const [showSettings, setShowSettings] = useState(false)
+  const [team, setTeamState] = useState<string[]>(loadTeam)
+  const [showStudio, setShowStudio] = useState(false)
+  const setTeam = useCallback((ids: string[]) => {
+    setTeamState(ids)
+    try {
+      localStorage.setItem(TEAM_KEY, JSON.stringify(ids))
+    } catch {
+      /* storage unavailable */
+    }
+  }, [])
   const [lightbox, setLightbox] = useState<Item | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const composer = useRef<ComposerHandle>(null)
@@ -136,16 +158,30 @@ export default function App() {
       const anchor = bounds(anchorItems.map(screenBox))
       // ×N variations become N placeholders filled by one call.
       const expanded = actions.flatMap((a, idx) => Array.from({ length: isMedia(a.kind) ? Math.min(a.count || 1, 4) : 1 }, () => ({ a, idx })))
-      const sizes = expanded.map(({ a }) => sizeFor(a.kind, a.aspect))
+      const sizes = expanded.map(({ a }) => sizeFor(a.kind, a.aspect, a.kind === 'note' ? a.card : ''))
       const spots = placeBatch(
         expanded.map((e, i) => ({ kind: e.a.kind, ...sizes[i] })),
         anchor,
         current.map(screenBox),
       )
       const now = Date.now()
+      const ids = expanded.map(() => uid())
+      // "@N" points at the first item made for action N in this reply; anything else must already be on the table.
+      const firstOf = new Map<number, string>()
+      expanded.forEach(({ idx }, i) => firstOf.has(idx) || firstOf.set(idx, ids[i]))
+      const known = new Set(current.map((it) => it.id))
+      const resolve = (refs: string[] = []) =>
+        refs.map((r) => (r.startsWith('@') ? firstOf.get(Number(r.slice(1))) : known.has(r) ? r : undefined)).filter((r): r is string => !!r)
       const created: Item[] = expanded.map(({ a }, i) => {
-        const base = { id: uid(), x: spots[i].x, y: spots[i].y, w: sizes[i].w, h: sizes[i].h, createdAt: now + i, from: sel.map((s) => s.id) }
-        if (a.kind === 'note') return { ...base, kind: 'note', text: a.content, color: a.color in NOTE_COLORS ? a.color : 'yellow' }
+        const links = resolve(a.link_to).filter((l) => l !== ids[i])
+        const base = { id: ids[i], x: spots[i].x, y: spots[i].y, w: sizes[i].w, h: sizes[i].h, createdAt: now + i, from: sel.map((s) => s.id), ...(links.length ? { links } : {}) }
+        if (a.kind === 'note') {
+          const note: Item = { ...base, kind: 'note', text: a.content, color: a.color in NOTE_COLORS ? a.color : 'yellow' }
+          if (a.card === 'reference') return { ...note, card: 'reference', who: a.who, title: a.title }
+          if (a.card === 'direction') return { ...note, card: 'direction', title: a.title, sources: a.sources, constraint: a.constraint }
+          if (a.card === 'voice') return { ...note, card: 'voice', mind: a.mind || undefined, who: a.who }
+          return note
+        }
         const model = a.model && getModel(a.model)?.kind === a.kind ? a.model : defaultModel(a.kind)
         const waits = a.after >= 0 && a.after < actions.length
         return { ...base, kind: a.kind, prompt: a.content, model, status: 'running', progress: waits ? `Waiting for step ${a.after + 1}` : 'Starting' }
@@ -163,7 +199,7 @@ export default function App() {
         const { a, idx } = expanded[i]
         const group = expanded.filter((e) => e.idx === idx).length
         const ids = created.slice(i, i + group).map((c) => c.id)
-        steps.push({ kind: a.kind, model: created[i].model, count: group, prompt: a.content })
+        steps.push({ kind: a.kind, card: a.kind === 'note' && a.card ? a.card : undefined, model: created[i].model, count: group, prompt: a.content })
         if (isMedia(a.kind)) {
           const model = created[i].model!
           const upstream = a.after >= 0 && a.after < idx ? results[a.after] : null
@@ -201,7 +237,7 @@ export default function App() {
       try {
         const current = itemsRef.current
         const selImages = current.filter((it) => selected.has(it.id) && it.kind === 'image' && it.url && it.status !== 'running').map((it) => it.url!)
-        const reply = await converse(settings, turns, text, { board: summarizeBoard(current, selected), selectedImages: selImages })
+        const reply = await converse(settings, turns, text, { board: summarizeBoard(current, selected), selectedImages: selImages, team })
         if (reply.remove.length) {
           const gone = new Set(reply.remove)
           setItems((is) => is.filter((it) => !gone.has(it.id)))
@@ -227,7 +263,7 @@ export default function App() {
         setTurns((t) => [...t, { role: 'assistant', text: `Something went wrong: ${msg}`, at: Date.now() }])
       }
     },
-    [applyActions, interrupt, selected, settings, turns],
+    [applyActions, interrupt, selected, settings, team, turns],
   )
 
   const newTable = useCallback(() => {
@@ -343,9 +379,12 @@ export default function App() {
           </span>
         </button>
         <span className="spacer" />
+        <button className="studio-btn" title="Your studio: creative minds in the room" onClick={() => setShowStudio(true)}>
+          <Studio ids={team} />
+        </button>
         {keysMissing && (
           <button className="demo-chip" onClick={() => setShowSettings(true)}>
-            Demo mode · add keys
+            Demo<span className="long"> mode</span> · add keys
           </button>
         )}
         <button className="icon" title="New table" onClick={newTable}>
@@ -355,7 +394,7 @@ export default function App() {
 
       <div className="body">
         <section className="chat">
-          <Thread turns={turns} status={status} onInterrupt={interrupt} onSuggest={send} />
+          <Thread turns={turns} status={status} onInterrupt={interrupt} onSuggest={send} team={team} />
           <Composer ref={composer} settings={settings} status={status} talk={talk} setTalk={setTalk} onSend={send} onAttach={addImage} onInterrupt={interrupt} onError={say} />
         </section>
         <section className="canvas">
@@ -386,6 +425,7 @@ export default function App() {
           }}
         />
       )}
+      {showStudio && <StudioModal value={team} onClose={() => setShowStudio(false)} onSave={(ids) => (setTeam(ids), setShowStudio(false))} />}
       {lightbox && (
         <div className="overlay" onClick={() => setLightbox(null)}>
           {lightbox.kind === 'video' ? (

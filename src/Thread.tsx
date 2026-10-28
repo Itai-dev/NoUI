@@ -9,12 +9,19 @@ interface Props {
   status: AgentStatus
   onInterrupt: () => void
   onSuggest: (text: string) => void
+  team: string[]
 }
 
-const SUGGESTIONS = ['A poster for a jazz night, then animate it', 'A 3D cat', 'Three logo ideas for a coffee cart', 'A calm 8-second ambient track']
+const SUGGESTIONS = [
+  'Remix: an identity for a design bookshop and café. I love Paula Scher and Dieter Rams',
+  'Where did Hayao Miyazaki steal from?',
+  'A poster for a jazz night, then animate it',
+  'A 3D cat',
+]
+const CARD_LABEL: Record<string, string> = { reference: 'Reference', direction: 'Direction', voice: 'Studio voice' }
 
 /** The conversation, laid out like a chat: your lines in bubbles, the agent's as plain text with what it put on the table. */
-export default function Thread({ turns, status, onInterrupt, onSuggest }: Props) {
+export default function Thread({ turns, status, onInterrupt, onSuggest, team }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.scrollTo({ top: 1e9, behavior: 'smooth' })
@@ -25,7 +32,7 @@ export default function Thread({ turns, status, onInterrupt, onSuggest }: Props)
       <div className="thread empty-thread">
         <h1>What are we making?</h1>
         <div className="suggestions">
-          {SUGGESTIONS.map((s) => (
+          {(team.length ? [SUGGESTIONS[0], 'Ask the studio: how do we make a bike shop unforgettable?', ...SUGGESTIONS.slice(2)] : SUGGESTIONS).map((s) => (
             <button key={s} onClick={() => onSuggest(s)}>{s}</button>
           ))}
         </div>
@@ -64,10 +71,10 @@ export default function Thread({ turns, status, onInterrupt, onSuggest }: Props)
 /** "Searched for flights"-style block: what went on the table and with which models. */
 function Tool({ steps }: { steps: Step[] }) {
   const counts = new Map<string, number>()
-  for (const s of steps) counts.set(s.kind, (counts.get(s.kind) ?? 0) + s.count)
-  const summary = [...counts].map(([k, n]) => `${n} ${plural((MEDIA_LABEL as Record<string, string>)[k] ?? k, n)}`).join(' · ')
+  for (const s of steps) counts.set(s.card ?? s.kind, (counts.get(s.card ?? s.kind) ?? 0) + s.count)
+  const summary = [...counts].map(([k, n]) => `${n} ${plural(CARD_LABEL[k] ?? (MEDIA_LABEL as Record<string, string>)[k] ?? k, n)}`).join(' · ')
   const models = [...new Set(steps.map((s) => s.model).filter(Boolean))] as string[]
-  const first = steps.find((s) => s.kind !== 'note')?.prompt ?? steps[0]?.prompt ?? ''
+  const first = steps.find((s) => s.kind !== 'note')?.prompt ?? steps.find((s) => !s.card)?.prompt ?? ''
   return (
     <div className="tool">
       <div className="tool-h">Put on the table</div>

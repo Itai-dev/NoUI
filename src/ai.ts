@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createFalClient } from '@fal-ai/client'
+import { getMind, MINDS, teamBrief } from './minds'
 import { getModel, MEDIA_LABEL, MODEL_GUIDE, MODELS, NOTE_COLORS } from './models'
-import type { Item, MediaKind, Turn } from './types'
+import type { CardKind, Item, MediaKind, Turn } from './types'
 
 // ---------- Settings (stored only in this browser) ----------
 
@@ -98,6 +99,13 @@ export interface Action {
   after: number // index of an earlier action whose result feeds this one, or -1
   count: number // variations (images only)
   aspect: string
+  card: '' | CardKind // notes only: a reference, a direction or a studio member's take
+  who: string
+  title: string
+  sources: string[]
+  constraint: string
+  mind: string
+  link_to: string[] // existing item ids, or "@N" for action N of this reply
 }
 
 export interface AgentReply {
@@ -118,7 +126,7 @@ const REPLY_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'content', 'model', 'color', 'use_selection', 'after', 'count', 'aspect'],
+        required: ['kind', 'content', 'model', 'color', 'use_selection', 'after', 'count', 'aspect', 'card', 'who', 'title', 'sources', 'constraint', 'mind', 'link_to'],
         properties: {
           kind: { type: 'string', enum: ['note', 'image', 'video', 'audio', 'model3d'] },
           content: { type: 'string' },
@@ -128,18 +136,31 @@ const REPLY_SCHEMA = {
           after: { type: 'integer' },
           count: { type: 'integer', description: 'Variations, 1 to 4 (images only)' },
           aspect: { type: 'string', enum: ['1:1', '16:9', '9:16', '4:3', '3:4'] },
+          card: { type: 'string', enum: ['', 'reference', 'direction', 'voice'] },
+          who: { type: 'string', description: 'reference: the creator; voice: who speaks; else empty' },
+          title: { type: 'string', description: 'reference: the work and year; direction: a short name; else empty' },
+          sources: { type: 'array', items: { type: 'string' }, description: 'direction: the creators or works it borrows from' },
+          constraint: { type: 'string', description: 'direction: its one deliberate limit' },
+          mind: { type: 'string', enum: ['', ...MINDS.map((m) => m.id)] },
+          link_to: { type: 'array', items: { type: 'string' }, description: 'Draw a line to these: existing item ids, or "@N" for action N (0-based) of this reply' },
         },
       },
     },
   },
 }
 
-const SYSTEM = `You are Atelier, a creative partner who talks with the user and makes things on a shared isometric table.
-The user speaks or types one line at a time. You answer briefly (spoken-style, 1–2 sentences) and act by adding items to the table.
+function systemPrompt(team: string[]) {
+  return `You are Atelier, a creative director who talks with the user and makes things on a shared isometric table. Your job is to get the user to new, bold ideas, not to the first obvious one.
+The user speaks or types one line at a time. You answer briefly (spoken-style, 1–3 sentences) and act by adding items to the table.
 
 Items you can add:
-- note: a short idea, name, line of copy or plan step (max ~25 words). Several notes for lists and brainstorms.
+- note: a short idea, name, line of copy or plan step (max ~25 words). Several notes for lists and brainstorms. card="" for a plain note.
+- reference card (kind note, card "reference"): a credited influence. who = the creator, title = the work and year (or "body of work, 1960s"), content = what to steal from it and why it works (max ~30 words).
+- direction card (kind note, card "direction"): a remix concept. title = a short name, sources = the 2+ creators or works it combines, constraint = its one deliberate limit, content = the idea in one or two sentences.
+- voice card (kind note, card "voice"): one studio member's take. mind = their id (or "" and who = their name for someone outside the studio), content = their idea in their way of seeing (max ~30 words).
 - image, video, audio, model3d: generated media. "content" is a complete standalone prompt. For voiceover audio, content is the exact words to speak.
+For every action, fill unused fields with "" or [].
+Lines: link_to draws lines on the table, for lineage (a reference to the one it descends from), a direction to its references, a voice to what it reacts to, a sketch to its direction. Use "@N" for an action in this same reply.
 
 Choosing a model is your job. Pick the best one for each item from this guide and say in your reply which you chose and why, in a few words:
 ${MODEL_GUIDE}
@@ -155,11 +176,38 @@ Say the plan in your reply in plain words ("Making a cat image first, then the 3
 
 Context: the user's selected items are the subject of words like "this", "it", "these". use_selection=true passes the selected images as references.
 "remove" lists ids of items the user asked to delete or replace.
-If the user is just talking or asking, reply and return no actions. Keep the table focused: 1–8 actions per turn.`
+If the user is just talking or asking, reply and return no actions. Keep the table focused: 1–12 actions per turn.
+
+How you think (inspired by Austin Kleon's Steal Like an Artist; never quote the book):
+- Nothing is original, and that frees us: every creator remixes their influences. Steal the thinking (a structure, a process, a rhythm, a constraint, a way of seeing), never the surface look.
+- Study the lineage: find who the user's heroes learned from, and who those people learned from. The deeper sources are less used and more surprising.
+- Copying one source is imitation; combining many distant ones is originality. Prefer sources from different fields, eras and places, and one close to home.
+- Credit every source by name on its card.
+- Constraints make work bold: give every direction one hard limit.
+- Make, don't wait: always end with a small next thing the user can do or see.
+- Push past the safe idea: when you offer options, one must break a convention of the category on purpose. Say which one is the bold one.
+You know the history of human creativity deeply: cave painters, ancient poets and builders, medieval craftspeople, the Renaissance, the moderns, film, music, games, product and contemporary design, across every culture. Use real, specific works, years and methods. When unsure of a detail, stay general rather than invent it.
+
+Remix (when the user starts a project, says "remix", asks for directions, or brings a brief):
+1. Brief. Know what it is, for whom, the medium, and 1–3 creators they love. If something important is missing, ask for it in one short question and add no cards. If they say "you choose", choose.
+2. Lineage map and steal list (one turn): 6–10 reference cards: their favorites, then who those learned from, up to three levels back. link_to each to the card it descends from. Each card's content says what to steal and why it works.
+3. Directions (next turn, or the same one if the user wants speed): 2–3 direction cards, each combining at least 2 distant references with one constraint, linked to those references. One is the bold one.
+4. Originality check, in your reply: any direction that leans on a single source gets fixed with a second, distant source before you show it.
+5. Make: when the user picks a direction or says go, sketch it with images linked to the direction. Translate what you borrowed into plain visual words.
+Names of living artists never go into a media prompt ("in the style of ..."). Describe the qualities you are borrowing instead. References and voice cards may name anyone.
+Voice cards speak through a person's known methods and outlook. Never invent quotes and put them in quotation marks.
+
+The studio:${team.length ? `
+The user brought these minds into the room:
+${teamBrief(team)}
+When you ideate, react to directions or the user asks the team, add one voice card per member (mind = their id), each applying that member's methods to the user's actual project, not a summary of their career. Let them disagree; then, as director, say in your reply what you take from them.` : ' none yet. The user can pick a team in the Studio. If they ask what a creator would do, answer with a voice card (mind "" and who = their name).'}
+Studio members the user can pick: ${MINDS.map((m) => m.short).join(', ')}. Anyone else in history can be consulted by name too.`
+}
 
 export interface AgentContext {
   board: string
   selectedImages: string[]
+  team: string[] // studio member ids
 }
 
 export async function converse(s: Settings, history: Turn[], text: string, ctx: AgentContext): Promise<AgentReply> {
@@ -176,8 +224,8 @@ export async function converse(s: Settings, history: Turn[], text: string, ctx: 
   }
   content.push({ type: 'text', text: `Table:\n${ctx.board}\n\nUser: ${text}` })
   messages.push({ role: 'user', content })
-  const out = JSON.parse(await callClaude(s, SYSTEM, messages, REPLY_SCHEMA)) as AgentReply
-  out.actions = out.actions.slice(0, 8)
+  const out = JSON.parse(await callClaude(s, systemPrompt(ctx.team), messages, REPLY_SCHEMA)) as AgentReply
+  out.actions = out.actions.slice(0, 12)
   return out
 }
 
@@ -186,10 +234,17 @@ export function summarizeBoard(items: Item[], selected: Set<string>) {
   return items
     .map((it) => {
       const what =
-        it.kind === 'note'
-          ? `"${(it.text ?? '').slice(0, 80)}"`
+        it.card === 'reference'
+          ? `reference: ${it.who} · ${it.title} · "${(it.text ?? '').slice(0, 80)}"`
+          : it.card === 'direction'
+            ? `direction "${it.title}" from ${(it.sources ?? []).join(' × ')}, constraint: ${it.constraint} · "${(it.text ?? '').slice(0, 80)}"`
+            : it.card === 'voice'
+              ? `voice of ${getMind(it.mind)?.name ?? it.who}: "${(it.text ?? '').slice(0, 80)}"`
+              : it.kind === 'note'
+                ? `"${(it.text ?? '').slice(0, 80)}"`
           : `${it.kind}${it.prompt ? ` "${it.prompt.slice(0, 60)}"` : ''}${it.model ? ` via ${it.model}` : ''}${it.status === 'error' ? ' (failed)' : ''}`
-      return `- ${it.id}: ${what}${selected.has(it.id) ? ' [selected]' : ''}`
+      const links = it.links?.length ? ` → ${it.links.join(', ')}` : ''
+      return `- ${it.id}: ${what}${links}${selected.has(it.id) ? ' [selected]' : ''}`
     })
     .join('\n')
 }
@@ -352,6 +407,46 @@ function demoImage(prompt: string, i: number) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
+/** A fixed remix, so the flow can be seen without keys: the Margin bookshop example. */
+function demoRemix(base: (k: Action['kind'], content: string, model?: string, extra?: Partial<Action>) => Action, team: string[], tail: string): AgentReply {
+  const ref = (who: string, title: string, content: string, link: number[] = []) =>
+    base('note', content, '', { card: 'reference', who, title, use_selection: false, link_to: link.map((n) => `@${n}`) })
+  const actions = [
+    ref('Paula Scher', 'Public Theater identity, 1994', 'Steal: type at the scale of architecture. The building becomes the logo.'),
+    ref('Dieter Rams', 'Braun products, 1955–95', 'Steal: one grid and few elements. Calm makes everything else louder.'),
+    ref('Push Pin Studios', 'posters, 1950s–60s', 'Steal: mixing historical styles freely. Old Hebrew print can sit beside new type.', [0]),
+    ref('Ulm School of Design', 'systems, 1953–68', 'Steal: one modular system that runs signs, shelves and labels.', [1]),
+    ref('Constructivism', 'posters, 1920s', 'Steal: two colors and diagonals. Cheap to print, loud on a wall.', [2]),
+    ref('White City, Tel Aviv', 'Bauhaus buildings, 1930s', 'Steal: horizontal bands and rounded corners, born of the local climate.', [3]),
+    base('note', 'Signage grid doubles as shelf labels; giant letters run along the bookcases.', '', {
+      card: 'direction',
+      title: 'Shelf system',
+      sources: ['Ulm School', 'Paula Scher'],
+      constraint: 'One typeface, one grid.',
+      color: '',
+      use_selection: false,
+      link_to: ['@3', '@0'],
+    }),
+    base('note', 'The bold one: every asset printed in-store on the letterpress, diagonals over Hebrew street lettering.', '', {
+      card: 'direction',
+      title: 'Two-colour press',
+      sources: ['Constructivism', 'White City signage'],
+      constraint: 'Red and black only.',
+      use_selection: false,
+      link_to: ['@4', '@5'],
+    }),
+  ]
+  for (const id of team.slice(0, 3)) {
+    const m = getMind(id)
+    if (m) actions.push(base('note', `For the press: ${m.moves.split(';')[0].replace(/^./, (c) => c.toLowerCase())}. ${m.lens}`, '', { card: 'voice', mind: id, use_selection: false, link_to: ['@7'] }))
+  }
+  return {
+    reply: 'A sample remix for a design bookshop: the lineage, what to steal from each, and two directions. The press one is the bold one.' + tail,
+    actions,
+    remove: [],
+  }
+}
+
 function demoReply(text: string, ctx: AgentContext): AgentReply {
   const p = text.toLowerCase()
   const hasSel = ctx.selectedImages.length > 0
@@ -364,10 +459,18 @@ function demoReply(text: string, ctx: AgentContext): AgentReply {
     after: -1,
     count: 1,
     aspect: '1:1',
+    card: '',
+    who: '',
+    title: '',
+    sources: [],
+    constraint: '',
+    mind: '',
+    link_to: [],
     ...extra,
   })
   const tail = ' (Demo: add an Anthropic key in Settings and I will really listen.)'
   if (!text.trim()) return { reply: 'Tell me what we are making.', actions: [], remove: [] }
+  if (/\b(remix|steal|influences?|lineage|directions?)\b/.test(p)) return demoRemix(base, ctx.team, tail)
   if (/\b(3d|mesh|model of)\b/.test(p)) return { reply: 'Turning it into 3D with Trellis, the fast clean mesh.' + tail, actions: [base('model3d', text, 'trellis')], remove: [] }
   if (/\b(video|animate|clip|motion|film)\b/.test(p))
     return { reply: `Making a clip with Kling${hasSel ? ' from your image' : ''}.` + tail, actions: [base('video', text, 'kling-2.5', { aspect: '16:9' })], remove: [] }
