@@ -26,7 +26,7 @@ const ANTHROPIC = env.ANTHROPIC_API_KEY || ''
 const FAL = env.FAL_KEY || ''
 
 const options = {
-  entryPoints: ['src/main.tsx'],
+  entryPoints: { main: 'src/main.tsx', studio: 'studio/web/main.tsx' },
   bundle: true,
   format: 'esm',
   outdir: 'www/assets',
@@ -75,8 +75,17 @@ async function forward(req, res, url, extraHeaders) {
   res.end()
 }
 
+// The Studio backend (creative director, budget gate, job scheduler, storage). It reads the same keys.
+process.env.ANTHROPIC_API_KEY = ANTHROPIC
+process.env.FAL_KEY = FAL
+for (const k of Object.keys(env)) if (k.startsWith('STUDIO_') && process.env[k] === undefined) process.env[k] = env[k]
+const { handleStudio, startStudio, studioConfig } = await import('./studio/server/api.ts')
+const studio = await startStudio()
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`)
+
+  if (await handleStudio(req, res, url)) return
 
   if (url.pathname === '/api/config') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -119,7 +128,12 @@ function deny(res, message, status = 401) {
   res.end(JSON.stringify({ error: { type: 'proxy', message } }))
 }
 
-server.listen(port, () => {
-  console.log(`\n  Atelier running at http://localhost:${port}`)
+// Local only by default: this server holds API keys and can spend money. Set HOST=0.0.0.0 to expose it.
+server.listen(port, process.env.HOST || '127.0.0.1', () => {
+  const cfg = studioConfig()
+  console.log(`\n  Studio running at http://localhost:${port}/studio/`)
+  console.log(`    ${studio.projects} project(s) in ${studio.dataDir}`)
+  console.log(`    Claude ${cfg.anthropic ? 'ready' : 'OFF (sample director only)'} · fal.ai ${cfg.fal ? 'ready' : 'OFF (dry run only)'} · prices ${cfg.pricing}`)
+  console.log(`  Atelier running at http://localhost:${port}`)
   console.log(`  Keys: Anthropic ${ANTHROPIC ? 'yes' : 'no'} · fal.ai ${FAL ? 'yes' : 'no'}${ANTHROPIC && FAL ? '' : '  (add them to .env, see .env.example)'}\n`)
 })

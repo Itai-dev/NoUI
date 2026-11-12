@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node dev.mjs",
     "build": "tsc -b && node dev.mjs --build",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --test studio/test/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.0.0",
